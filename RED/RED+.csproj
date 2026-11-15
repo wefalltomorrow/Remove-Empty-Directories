@@ -26,6 +26,7 @@
     <DefineConstants>DEBUG;TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <LangVersion>7.3</LangVersion>
     <CodeAnalysisRuleSet>MinimumRecommendedRules.ruleset</CodeAnalysisRuleSet>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
@@ -36,6 +37,7 @@
     <DefineConstants>TRACE</DefineConstants>
     <ErrorReport>prompt</ErrorReport>
     <WarningLevel>4</WarningLevel>
+    <LangVersion>7.3</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x64'">
     <DebugSymbols>true</DebugSymbols>
@@ -369,7 +371,6 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PreBuildEvent>C:\Binx\unix\gnu\bin\date.exe +"%25%25Y-%25%25m-%25%25dT%25%25T" &gt; "$(ProjectDir)Resources\BuildTime$(ConfigurationName).txt"
-</PreBuildEvent>
+    <PreBuildEvent>powershell.exe -NoProfile -Command "Get-Date -Format 'yyyy-MM-ddTHH:mm:ss' | Set-Content -NoNewline -Encoding Ascii '$(ProjectDir)Resources/BuildTime$(ConfigurationName).txt'"</PreBuildEvent>
   </PropertyGroup>
 </Project>

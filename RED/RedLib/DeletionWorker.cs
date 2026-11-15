@@ -138,7 +138,8 @@ namespace RED
 					FileInfo file = Files[f];
 
 					string delPattern;
-					bool deleteTrashFile = this.Data.IgnoreFileNameList.IsOnList(file, (int)file.Length, this.Data.IgnoreEmptyFiles, out delPattern);
+					long fileSize = this.Data.IgnoreEmptyFiles ? file.Length : 0L;
+					bool deleteTrashFile = this.Data.IgnoreFileNameList.IsOnList(file, fileSize, this.Data.IgnoreEmptyFiles, out delPattern);
 
 					// If only one file is good, then stop.
 					if (deleteTrashFile)

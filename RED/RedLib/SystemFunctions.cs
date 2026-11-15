@@ -61,36 +61,35 @@ namespace RED
 
         public static bool IsDirLocked(string path)
         {
+            string probePath = null;
+            bool probeCreated = false;
             try
             {
-                // UGLY hack to determine whether we have write access
-                // to a specific directory
-
-                Random r = new Random();
-                string tempName = path + "deltest";
-
-                int counter = 0;
-                while (Directory.Exists(tempName))
+                // Probe the parent directory without renaming the user's directory.
+                DirectoryInfo parent = new DirectoryInfo(path).Parent;
+                if (parent == null || !parent.Exists)
                 {
-                    tempName = path + "deltest" + r.Next(0, 9999).ToString();
-                    if (counter > 100)
-                    {
-                        return true; // Something strange is going on... stop here...
-                    }
-
-                    counter++;
+                    return true;
                 }
 
-                Directory.Move(path, tempName);
-                Directory.Move(tempName, path);
-
+                probePath = Path.Combine(parent.FullName, ".red-delete-probe-" + Guid.NewGuid().ToString("N"));
+                Directory.CreateDirectory(probePath);
+                probeCreated = true;
+                Directory.Delete(probePath);
+                probeCreated = false;
                 return false;
             }
-            catch //(Exception ex)
+            catch
             {
-                // Could not rename -> probably we have no
-                // write access to the directory
                 return true;
+            }
+            finally
+            {
+                if (probeCreated)
+                {
+                    try { Directory.Delete(probePath); }
+                    catch { }
+                }
             }
         }
 

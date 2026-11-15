@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Threading;
+using System.Threading.Tasks;
 using Alphaleonis.Win32.Filesystem;
 using RED.Helper;
 using FileAttributes = System.IO.FileAttributes;
@@ -14,17 +16,23 @@ namespace RED
 	public class FindEmptyDirectoryWorker : BackgroundWorker
 	{
 		private int folderCount = 0;
+		private int possibleEndlessLoop = 0;
+		private readonly SemaphoreSlim scanSlots = new SemaphoreSlim(Math.Min(7, Math.Max(0, Environment.ProcessorCount - 1)));
 
 		public int FolderCount
 		{
-			get { return folderCount; }
+			get { return Interlocked.CompareExchange(ref folderCount, 0, 0); }
 		}
 
 		public RuntimeData RunData { get; set; }
 
 		public DeletionErrorEventArgs ErrorInfo { get; set; }
 
-		public int PossibleEndlessLoop { get; set; }
+		public int PossibleEndlessLoop
+		{
+			get { return Interlocked.CompareExchange(ref possibleEndlessLoop, 0, 0); }
+			set { Interlocked.Exchange(ref possibleEndlessLoop, value); }
+		}
 
 		public FindEmptyDirectoryWorker()
 		{
@@ -37,13 +45,15 @@ namespace RED
 			DirectoryInfo startFolder = (DirectoryInfo)e.Argument;
 
 			this.PossibleEndlessLoop = 0;
+			Interlocked.Exchange(ref this.folderCount, 0);
 			this.RunData.ScanResults.Clear();
 
 			try
 			{
-				DirectorySearchStatusTypes rootStatusType = this.CheckIfDirectoryEmpty(startFolder, 1);
+				int rootFileCount;
+				DirectorySearchStatusTypes rootStatusType = this.CheckIfDirectoryEmpty(startFolder, 1, out rootFileCount);
 
-				this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startFolder, rootStatusType));
+				this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startFolder, rootStatusType, rootFileCount));
 
 				if (this.PossibleEndlessLoop > this.RunData.InfiniteLoopDetectionCount)
 				{
@@ -71,8 +81,9 @@ namespace RED
 			e.Result = 1;
 		}
 
-		private DirectorySearchStatusTypes CheckIfDirectoryEmpty(DirectoryInfo startDir, int depth)
+		private DirectorySearchStatusTypes CheckIfDirectoryEmpty(DirectoryInfo startDir, int depth, out int fileCount)
 		{
+			fileCount = 0;
 			if (this.PossibleEndlessLoop > this.RunData.InfiniteLoopDetectionCount)
 			{
 				this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startDir, DirectorySearchStatusTypes.Error, TXT.Translate("Aborted - possible infinite-loop detected")));
@@ -94,12 +105,12 @@ namespace RED
 					return DirectorySearchStatusTypes.NotEmpty;
 				}
 
-				this.folderCount++;
+				int checkedFolderCount = Interlocked.Increment(ref this.folderCount);
 
 				// update status progress bar after 100 steps:
-				if (this.folderCount % 100 == 0)
+				if (checkedFolderCount % 100 == 0)
 				{
-					this.ReportProgress(folderCount, TXT.Translate("Checking directory: {0}", startDir.Name));
+					this.ReportProgress(checkedFolderCount, TXT.Translate("Checking directory: {0}", startDir.Name));
 				}
 
 				bool containsFiles = false;
@@ -119,70 +130,53 @@ namespace RED
 				if (!containsFiles)
 				{
 					// Get file list
-					FileInfo[] fileList = null;
-
-					// some directories could trigger an exception:
+					string delPattern = string.Empty;
 					try
 					{
-						fileList = startDir.GetFiles();
-					}
-					catch
-					{
-						fileList = null;
-					}
-
-					if (fileList == null)
-					{
-						// if containsFiles is true then the folder does not get deleted:
-						containsFiles = true; // secure way
-						this.RunData.AddLogMessage(TXT.Translate("Failed to access files in {0}", RedAssist.DQuote(startDir.FullName)));
-						this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startDir, DirectorySearchStatusTypes.Error, TXT.Translate("Failed to access files")));
-					}
-					else if (fileList.Length == 0)
-					{
-						containsFiles = false;
-					}
-					else
-					{
-						string delPattern = string.Empty;
-
-						// loop trough files and cancel if containsFiles == true
-						for (int f = 0; (f < fileList.Length && !containsFiles); f++)
+						foreach (FileInfo file in startDir.EnumerateFiles())
 						{
-							FileInfo file = null;
-							int filesize = 0;
+							fileCount++;
 
+							long filesize;
 							try
 							{
-								file = fileList[f];
-								filesize = (int)file.Length;
+								filesize = RunData.IgnoreEmptyFiles ? file.Length : 0L;
 							}
 							catch
 							{
-								// keep folder if there is a strange file that triggers an exception:
+								// Keep the folder if a file cannot be inspected.
 								containsFiles = true;
 								break;
 							}
 
-							// It only takes one file to be found to stop the scan
 							if (!this.RunData.IgnoreFileNameList.IsOnList(file, filesize, RunData.IgnoreEmptyFiles, out delPattern))
 							{
 								containsFiles = true;
+								// One non-ignored file is enough to keep this directory.
+								break;
 							}
 						}
+					}
+					catch
+					{
+						// If enumeration fails, keep the directory and report the access error.
+						containsFiles = true;
+						this.RunData.AddLogMessage(TXT.Translate("Failed to access files in {0}", RedAssist.DQuote(startDir.FullName)));
+						this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startDir, DirectorySearchStatusTypes.Error, TXT.Translate("Failed to access files")));
 					}
 				}
 
 				List<DirectoryInfo> subFolderList = new List<DirectoryInfo>();
 				try
 				{
-					subFolderList.AddRange(startDir.GetDirectories());
+					subFolderList.AddRange(startDir.EnumerateDirectories());
 				}
 				catch
 				{
 					// If we can not read the folder -> don't delete it:
 					this.RunData.AddLogMessage(TXT.Translate("Failed to access subdirectories in {0}", RedAssist.DQuote(startDir.FullName)));
 					this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startDir, DirectorySearchStatusTypes.Error, TXT.Translate("Failed to access subdirectories")));
+					fileCount = 0;
 					return DirectorySearchStatusTypes.Error;
 				}
 
@@ -193,12 +187,11 @@ namespace RED
 				}
 
 				bool allSubDirectoriesEmpty = true;
+				int scanCount = 0;
 
-				// NotBob - sort subfolders to give a more 'natural' order to the displayed results
-				subFolderList.Sort((x, y) => x.Name.CompareTo(y.Name));
-
-				foreach (DirectoryInfo curDir in subFolderList)
+				for (int i = 0; i < subFolderList.Count; i++)
 				{
+					DirectoryInfo curDir = subFolderList[i];
 					FileAttributes attribs = curDir.Attributes;
 
 					bool ignoreSystemDir = (this.RunData.IgnoreSystemFolders && ((attribs & FileAttributes.System) == FileAttributes.System));
@@ -233,33 +226,89 @@ namespace RED
 					//else if ((attribs & FileAttributes.ReadOnly) == FileAttributes.ReadOnly) msg = "ReadOnly -  found";
 					//else if ((attribs & FileAttributes.Temporary) == FileAttributes.Temporary) msg = "Temporary -  found";
 
-					// Scan sub folder:
-					DirectorySearchStatusTypes subFolderStatus = DirectorySearchStatusTypes.NotEmpty;
-
 					if (!ignoreSubDirectory)
 					{
 						// JRS ADDED check for AGE of folder
 						if (curDir.CreationTime.AddHours(this.RunData.MinFolderAgeHours) < DateTime.Now)
 						{
-							subFolderStatus = this.CheckIfDirectoryEmpty(curDir, depth + 1);
+							subFolderList[scanCount++] = curDir;
 						}
 						else
 						{
 							string fmt = string.Format(TXT.Translate("Directory {0} skipped because creation time [{1}] is < {2} hours old"));
 							this.RunData.AddLogMessage(string.Format(fmt, RedAssist.DQuote(curDir.FullName), curDir.CreationTime.ToString(), this.RunData.MinFolderAgeHours.ToString()));
-						}
-
-						// Report status to the GUI
-						if (subFolderStatus == DirectorySearchStatusTypes.Empty)
-						{
-							this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(curDir, subFolderStatus));
+							allSubDirectoriesEmpty = false;
 						}
 					}
-
-					// this folder is not empty:
-					if (subFolderStatus != DirectorySearchStatusTypes.Empty || ignoreSubDirectory)
+					else
 					{
 						allSubDirectoriesEmpty = false;
+					}
+				}
+
+				List<Task<DirectorySearchStatusTypes>> scanTasks = null;
+				try
+				{
+					for (int i = 0; i < scanCount; i++)
+					{
+						DirectoryInfo curDir = subFolderList[i];
+						if (CancellationPending)
+						{
+							allSubDirectoriesEmpty = false;
+							break;
+						}
+
+						if (scanSlots.Wait(0))
+						{
+							if (scanTasks == null)
+							{
+								scanTasks = new List<Task<DirectorySearchStatusTypes>>();
+							}
+
+							try
+							{
+								scanTasks.Add(Task.Run(() =>
+								{
+									try
+									{
+										return ScanSubDirectory(curDir, depth + 1);
+									}
+									finally
+									{
+										scanSlots.Release();
+									}
+								}));
+							}
+							catch
+							{
+								scanSlots.Release();
+								throw;
+							}
+						}
+						else if (ScanSubDirectory(curDir, depth + 1) != DirectorySearchStatusTypes.Empty)
+						{
+							allSubDirectoriesEmpty = false;
+						}
+					}
+				}
+				catch
+				{
+					if (scanTasks != null)
+					{
+						Task.WaitAll(scanTasks.ToArray());
+					}
+					throw;
+				}
+
+				if (scanTasks != null)
+				{
+					Task.WaitAll(scanTasks.ToArray());
+					foreach (Task<DirectorySearchStatusTypes> scanTask in scanTasks)
+					{
+						if (scanTask.Result != DirectorySearchStatusTypes.Empty)
+						{
+							allSubDirectoriesEmpty = false;
+						}
 					}
 				}
 
@@ -271,12 +320,24 @@ namespace RED
 				// Error handling
 				if (ex is System.IO.PathTooLongException)
 				{
-					this.PossibleEndlessLoop++;
+					Interlocked.Increment(ref this.possibleEndlessLoop);
 				}
 				this.RunData.AddLogMessage(TXT.Translate("An unknown error occurred while trying to scan directory: {0} - {1}", RedAssist.DQuote(startDir.FullName), ex.Message));
 				this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(startDir, DirectorySearchStatusTypes.Error, ex.Message));
+				fileCount = 0;
 				return DirectorySearchStatusTypes.Error;
 			}
+		}
+
+		private DirectorySearchStatusTypes ScanSubDirectory(DirectoryInfo directory, int depth)
+		{
+			int childFileCount;
+			DirectorySearchStatusTypes status = this.CheckIfDirectoryEmpty(directory, depth, out childFileCount);
+			if (status == DirectorySearchStatusTypes.Empty)
+			{
+				this.ReportProgress(0, new FoundEmptyDirInfoEventArgs(directory, status, childFileCount));
+			}
+			return status;
 		}
 	}
 }

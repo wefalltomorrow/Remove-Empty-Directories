@@ -10,7 +10,14 @@ namespace RED.Match
 		{
 			FilterType = RedMatchFilterType.Generic;
 			Items = new List<RedMatchItem>();
+			itemsByMethod = new List<RedMatchItem>[(int)RedMatchMethodType.RegExPath + 1];
+			for (int i = 0; i < itemsByMethod.Length; i++)
+			{
+				itemsByMethod[i] = new List<RedMatchItem>();
+			}
 		}
+
+		private readonly List<RedMatchItem>[] itemsByMethod;
 
 		public RedMatchItemList(RedMatchFilterType filterType) : this()
 		{
@@ -21,7 +28,27 @@ namespace RED.Match
 		public RedMatchItem this[int index]
 		{
 			get { return Items[index]; }
-			set { Items[index] = value; }
+			set
+			{
+				Items[index] = value;
+				RebuildMethodLists();
+			}
+		}
+
+		private void RebuildMethodLists()
+		{
+			for (int i = 0; i < itemsByMethod.Length; i++)
+			{
+				itemsByMethod[i].Clear();
+			}
+			foreach (RedMatchItem item in Items)
+			{
+				int methodIndex = item == null ? -1 : (int)item.MatchMethod;
+				if (methodIndex >= 0 && methodIndex < itemsByMethod.Length)
+				{
+					itemsByMethod[methodIndex].Add(item);
+				}
+			}
 		}
 
 		public IEnumerator<RedMatchItem> GetEnumerator()
@@ -101,7 +128,9 @@ namespace RED.Match
 
 				if (matchMethod != RedMatchMethodType.Invalid && !string.IsNullOrWhiteSpace(matchText))
 				{
-					Items.Add(new RedMatchItem(matchMethod, matchText, enabledFlag == "+" ? true : false));
+					RedMatchItem item = new RedMatchItem(matchMethod, matchText, enabledFlag == "+");
+					Items.Add(item);
+					itemsByMethod[(int)matchMethod].Add(item);
 				}
 			}
 		}
@@ -115,6 +144,10 @@ namespace RED.Match
 		public void Transform(List<string> v)
 		{
 			Items.Clear();
+			for (int i = 0; i < itemsByMethod.Length; i++)
+			{
+				itemsByMethod[i].Clear();
+			}
 			foreach (string item in v)
 			{
 				if (!string.IsNullOrWhiteSpace(item))
@@ -133,6 +166,11 @@ namespace RED.Match
 
 		public bool IsOnList(FileInfo fileinfo, int filesize, bool ignoreEmptyFiles, out string delPattern)
 		{
+			return IsOnList(fileinfo, (long)filesize, ignoreEmptyFiles, out delPattern);
+		}
+
+		public bool IsOnList(FileInfo fileinfo, long filesize, bool ignoreEmptyFiles, out string delPattern)
+		{
 			string nameToCheck = fileinfo.Name.ToLowerInvariant();
 			string pathToCheck = fileinfo.FullName.ToLowerInvariant();
 			return IsOnList(nameToCheck, pathToCheck, filesize, ignoreEmptyFiles, out delPattern);
@@ -150,7 +188,7 @@ namespace RED.Match
 			}
 		}
 
-		private bool IsOnList(string nameToCheck, string pathToCheck, int filesize, bool ignoreEmptyFiles, out string delPattern)
+		private bool IsOnList(string nameToCheck, string pathToCheck, long filesize, bool ignoreEmptyFiles, out string delPattern)
 		{
 			bool matched = false;
 
@@ -170,9 +208,9 @@ namespace RED.Match
 				}
 				if (!matched)
 				{
-					foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.NameExact && x.Enabled))
+					foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.NameExact])
 					{
-						if (nameToCheck == matchItem.MatchTextToCompare)
+						if (matchItem.Enabled && nameToCheck == matchItem.MatchTextToCompare)
 						{
 							matched = true;
 							delPattern = matchItem.MatchText;
@@ -182,8 +220,9 @@ namespace RED.Match
 				}
 				if (!matched)
 				{
-					foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.Contains && x.Enabled))
+					foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.Contains])
 					{
+						if (!matchItem.Enabled) continue;
 						textToCheck = GetCheckText(matchItem.MatchTextToCompare, nameToCheck, pathToCheck);
 						if (textToCheck.Contains(matchItem.MatchTextToCompare))
 						{
@@ -195,8 +234,9 @@ namespace RED.Match
 				}
 				if (!matched)
 				{
-					foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.Endswith && x.Enabled))
+					foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.Endswith])
 					{
+						if (!matchItem.Enabled) continue;
 						textToCheck = GetCheckText(matchItem.MatchTextToCompare, nameToCheck, pathToCheck);
 						if (textToCheck.EndsWith(matchItem.MatchTextToCompare))
 						{
@@ -208,8 +248,9 @@ namespace RED.Match
 				}
 				if (!matched)
 				{
-					foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.Startwith && x.Enabled))
+					foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.Startwith])
 					{
+						if (!matchItem.Enabled) continue;
 						textToCheck = GetCheckText(matchItem.MatchTextToCompare, nameToCheck, pathToCheck);
 						if (textToCheck.StartsWith(matchItem.MatchTextToCompare))
 						{
@@ -221,8 +262,9 @@ namespace RED.Match
 				}
 				if (!matched)
 				{
-					foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.RegExName && x.Enabled))
+					foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.RegExName])
 					{
+						if (!matchItem.Enabled) continue;
 						if (matchItem.RegEx.IsMatch(nameToCheck))
 						{
 							matched = true;
@@ -235,8 +277,9 @@ namespace RED.Match
 				{
 					if (!matched)
 					{
-						foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.RegExPath && x.Enabled))
+						foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.RegExPath])
 						{
+							if (!matchItem.Enabled) continue;
 							if (matchItem.RegEx.IsMatch(pathToCheck))
 							{
 								matched = true;
@@ -247,9 +290,9 @@ namespace RED.Match
 					}
 					if (!matched)
 					{
-						foreach (RedMatchItem matchItem in Items.FindAll(x => x.MatchMethod == RedMatchMethodType.NameExactWithPath && x.Enabled))
+						foreach (RedMatchItem matchItem in itemsByMethod[(int)RedMatchMethodType.NameExactWithPath])
 						{
-							if (pathToCheck == matchItem.MatchTextToCompare)
+							if (matchItem.Enabled && pathToCheck == matchItem.MatchTextToCompare)
 							{
 								matched = true;
 								delPattern = matchItem.MatchText;

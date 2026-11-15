@@ -113,6 +113,11 @@ namespace RED
 			ScanResult = new RedScanResultItem(directory, type);
 		}
 
+		public FoundEmptyDirInfoEventArgs(DirectoryInfo directory, DirectorySearchStatusTypes type, int fileCount)
+		{
+			ScanResult = new RedScanResultItem(directory, type, fileCount);
+		}
+
 		public FoundEmptyDirInfoEventArgs(DirectoryInfo directory, DirectorySearchStatusTypes type, string errorMessage)
 		{
 			ScanResult = new RedScanResultItem(directory, type, errorMessage);

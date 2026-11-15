@@ -344,7 +344,7 @@ namespace RED.UI
 
         private void Core_OnFoundEmptyDir(object sender, FoundEmptyDirInfoEventArgs e)
         {
-            TreeMgr.AddOrUpdateDirectoryNode(e.ScanResult.Directory, e.ScanResult.SearchStatus, e.ScanResult.ErrorMessage);
+            TreeMgr.AddOrUpdateDirectoryNode(e.ScanResult);
         }
 
         private void Core_OnFoundFinishedScanForEmptyDirs(object sender, FinishedScanForEmptyDirsEventArgs e)

@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Windows.Forms;
@@ -138,6 +139,7 @@ namespace RED
 		{
 			if (!this.fastMode)
 			{
+				sortTreeNodes(this.rootNode);
 				return;
 			}
 
@@ -145,10 +147,53 @@ namespace RED
 			this.clearFastMode();
 
 			this.addRootNode();
+			sortTreeNodes(this.rootNode);
 
 			// Scroll to root node and expand all dirs
 			this.rootNode.EnsureVisible();
 			this.treeView.ExpandAll();
+		}
+
+		private void sortTreeNodes(TreeNode node)
+		{
+			if (node == null)
+			{
+				return;
+			}
+
+			this.treeView.TreeViewNodeSorter = DirectoryNodeComparer.Instance;
+			Stack<TreeNode> nodes = new Stack<TreeNode>();
+			nodes.Push(node);
+			while (nodes.Count > 0)
+			{
+				TreeNode current = nodes.Pop();
+				List<TreeNode> children = new List<TreeNode>();
+				foreach (TreeNode child in current.Nodes)
+				{
+					children.Add(child);
+				}
+
+				children.Sort((left, right) => DirectoryNodeComparer.Instance.Compare(left, right));
+				current.Nodes.Clear();
+				current.Nodes.AddRange(children.ToArray());
+
+				foreach (TreeNode child in children)
+				{
+					nodes.Push(child);
+				}
+			}
+		}
+
+		private sealed class DirectoryNodeComparer : IComparer
+		{
+			internal static readonly DirectoryNodeComparer Instance = new DirectoryNodeComparer();
+
+			public int Compare(object x, object y)
+			{
+				DirectoryInfo left = (DirectoryInfo)((TreeNode)x).Tag;
+				DirectoryInfo right = (DirectoryInfo)((TreeNode)y).Tag;
+				return left.Name.CompareTo(right.Name);
+			}
 		}
 
 		/// <summary>
@@ -242,11 +287,21 @@ namespace RED
 
 		public TreeNode AddOrUpdateDirectoryNode(DirectoryInfo directory, DirectorySearchStatusTypes statusType, string optionalErrorMsg)
 		{
+			return AddOrUpdateDirectoryNode(directory, statusType, optionalErrorMsg, 0);
+		}
+
+		public TreeNode AddOrUpdateDirectoryNode(RedScanResultItem scanResult)
+		{
+			return AddOrUpdateDirectoryNode(scanResult.Directory, scanResult.SearchStatus, scanResult.ErrorMessage, scanResult.FileCount);
+		}
+
+		private TreeNode AddOrUpdateDirectoryNode(DirectoryInfo directory, DirectorySearchStatusTypes statusType, string optionalErrorMsg, int fileCount)
+		{
 			if (directoryToTreeNodeMapping.ContainsKey(directory.FullName))
 			{
 				// Just update the style if the node already exists
 				TreeNode node = directoryToTreeNodeMapping[directory.FullName];
-				applyNodeStyle(node, directory, statusType, optionalErrorMsg);
+				applyNodeStyle(node, directory, statusType, optionalErrorMsg, fileCount);
 				return node;
 			}
 
@@ -254,7 +309,7 @@ namespace RED
 
 			// Create new tree node
 			TreeNode newTreeNode = new TreeNode(directory.Name);
-			applyNodeStyle(newTreeNode, directory, statusType, optionalErrorMsg);
+			applyNodeStyle(newTreeNode, directory, statusType, optionalErrorMsg, fileCount);
 			newTreeNode.Tag = directory;
 
 			if (directory.Parent.FullName.Trim(Path.AltDirectorySeparatorChar).Equals(this.rootPath, StringComparison.OrdinalIgnoreCase))
@@ -276,11 +331,16 @@ namespace RED
 
 		private void applyNodeStyle(TreeNode treeNode, RedScanResultItem scanResult)
 		{
-			applyNodeStyle(treeNode, scanResult.Directory, scanResult.SearchStatus, scanResult.ErrorMessage);
+			applyNodeStyle(treeNode, scanResult.Directory, scanResult.SearchStatus, scanResult.ErrorMessage, scanResult.FileCount);
 		}
 
 		//private void applyNodeStyle(TreeNode treeNode, string path, DirectorySearchStatusTypes statusType, string optionalErrorMsg)
 		private void applyNodeStyle(TreeNode treeNode, DirectoryInfo directory, DirectorySearchStatusTypes statusType, string optionalErrorMsg)
+		{
+			applyNodeStyle(treeNode, directory, statusType, optionalErrorMsg, 0);
+		}
+
+		private void applyNodeStyle(TreeNode treeNode, DirectoryInfo directory, DirectorySearchStatusTypes statusType, string optionalErrorMsg, int fileCount)
 		{
 			//var directory = new DirectoryInfo(path);
 
@@ -291,7 +351,6 @@ namespace RED
 			switch (statusType)
 			{
 				case DirectorySearchStatusTypes.Empty:
-					int fileCount = directory.GetFiles().Length;
 					bool containsTrash = (fileCount > 0);
 
 					iconKey = containsTrash ? "folder_trash_files" : "folder";

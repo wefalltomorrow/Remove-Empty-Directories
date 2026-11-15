@@ -1,0 +1,38 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-build:
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up NuGet
+        uses: NuGet/setup-nuget@v3
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Restore packages
+        run: nuget restore "!RED+.sln" -NonInteractive
+
+      - name: Build Release
+        run: msbuild "!RED+.sln" /m /p:Configuration=Release /p:Platform="Any CPU" /verbosity:minimal
+
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: RED+-Release-${{ github.sha }}
+          path: bin/Release/
+          if-no-files-found: error
+          retention-days: 14

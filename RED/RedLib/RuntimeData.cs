@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Alphaleonis.Win32.Filesystem;
 using RED.Match;
@@ -46,17 +47,34 @@ namespace RED
 		// NotBob - Dedicated ScanResults list to collect details of a RED scan
 		public RedScanResultItemList ScanResults { get; private set; }
 
+		private readonly object logSync = new object();
+
 		public void AddLogMessage(string msg)
 		{
-			this.LogMessages.AppendLine(DateTime.Now.ToString("r") + "\t" + msg);
+			lock (logSync)
+			{
+				string timestamp = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture);
+				this.LogMessages.AppendLine(timestamp + "\t" + msg);
+			}
+		}
+
+		public string GetLogMessages()
+		{
+			lock (logSync)
+			{
+				return this.LogMessages.ToString();
+			}
 		}
 
 		internal void AddLogSpacer()
 		{
-			if (this.LogMessages.Length > 0)
-            {
-                this.LogMessages.Append(Environment.NewLine);
-            }
-        }
+			lock (logSync)
+			{
+				if (this.LogMessages.Length > 0)
+				{
+					this.LogMessages.Append(Environment.NewLine);
+				}
+			}
+		}
 	}
 }

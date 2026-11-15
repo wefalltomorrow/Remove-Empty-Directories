@@ -8,8 +8,14 @@ namespace RED.Match
 		public RedScanResultItem(DirectoryInfo di, DirectorySearchStatusTypes status) : this(di, status, string.Empty) { }
 
 		public RedScanResultItem(DirectoryInfo di, DirectorySearchStatusTypes status, string errorMsg)
+			: this(di, status, errorMsg, 0) { }
+
+		public RedScanResultItem(DirectoryInfo di, DirectorySearchStatusTypes status, int fileCount)
+			: this(di, status, string.Empty, fileCount) { }
+
+		private RedScanResultItem(DirectoryInfo di, DirectorySearchStatusTypes status, string errorMsg, int fileCount)
 		{
-			Populate(di, status, errorMsg);
+			Populate(di, status, errorMsg, fileCount);
 		}
 
 		public DirectoryInfo Directory { get; private set; }
@@ -18,8 +24,9 @@ namespace RED.Match
 		public DirectorySearchStatusTypes SearchStatus { get; private set; }
 		public DirectorySearchStatusTypes SearchStatusOriginal { get; private set; }
 		public string ErrorMessage { get; private set; }
+		public int FileCount { get; private set; }
 
-		private void Populate(DirectoryInfo di, DirectorySearchStatusTypes status, string errorMsg)
+		private void Populate(DirectoryInfo di, DirectorySearchStatusTypes status, string errorMsg, int fileCount)
 		{
 			try
 			{
@@ -27,6 +34,7 @@ namespace RED.Match
 				SearchStatus = status;
 				SearchStatusOriginal = status;
 				ErrorMessage = errorMsg;
+				FileCount = fileCount;
 			}
 			catch (Exception ex)
 			{
